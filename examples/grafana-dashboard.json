@@ -464,21 +464,6 @@
                 "value": "negative-Y"
               }
             ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Used Storage"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "red",
-                  "mode": "fixed"
-                }
-              }
-            ]
           }
         ]
       },
@@ -527,17 +512,6 @@
           "expr": "android_storage_free_gb * 1073741824",
           "legendFormat": "Free Storage",
           "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "(android_storage_total_gb - android_storage_free_gb) * 1073741824",
-          "legendFormat": "Used Storage",
-          "refId": "C"
         }
       ],
       "title": "Storage Usage",
@@ -787,64 +761,7 @@
           },
           "unit": "short"
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "CPU Usage"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Memory Used"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "bytes"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Memory Available"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "bytes"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Storage Free"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "bytes"
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -875,7 +792,6 @@
           "editorMode": "code",
           "exemplar": false,
           "expr": "android_cpu_usage_percent",
-          "format": "table",
           "instant": true,
           "legendFormat": "CPU Usage",
           "refId": "A"
@@ -887,10 +803,9 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "android_memory_used_mb * 1024 * 1024",
-          "format": "table",
+          "expr": "android_memory_available_mb",
           "instant": true,
-          "legendFormat": "Memory Used",
+          "legendFormat": "Memory Available",
           "refId": "B"
         },
         {
@@ -900,28 +815,14 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "android_memory_available_mb * 1024 * 1024",
-          "format": "table",
-          "instant": true,
-          "legendFormat": "Memory Available",
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "android_storage_free_gb * 1073741824",
-          "format": "table",
+          "expr": "android_storage_free_gb",
           "instant": true,
           "legendFormat": "Storage Free",
-          "refId": "D"
+          "refId": "C"
         }
       ],
       "title": "Current Values",
-      "type": "table"
+      "type": "stat"
     }
   ],
   "refresh": "10s",
@@ -950,46 +851,6 @@
         "regex": "",
         "skipUrlSync": false,
         "type": "datasource"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "android-devices",
-          "value": "android-devices"
-        },
-        "description": "Job name to filter metrics",
-        "hide": 0,
-        "label": "Job",
-        "name": "job",
-        "options": [],
-        "query": {
-          "query": "label_values(up, job)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 2,
-        "regex": "",
-        "skipUrlSync": false,
-        "type": "query"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "All",
-          "value": "$__all"
-        },
-        "description": "Device instance",
-        "hide": 0,
-        "label": "Instance",
-        "name": "instance",
-        "options": [],
-        "query": {
-          "query": "label_values(up{job=\"$job\"}, instance)",
-          "refId": "StandardVariableQuery"
-        },
-        "refresh": 2,
-        "regex": "",
-        "skipUrlSync": false,
-        "type": "query"
       }
     ]
   },
