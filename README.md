@@ -5,7 +5,7 @@
 
 Monitor Android devices remotely with Prometheus & Grafana. No root required!
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Single Device)
 
 ### Step 1: Android Setup
 1. Install [Termux](https://f-droid.org/en/packages/com.termux/)
@@ -25,6 +25,10 @@ Monitor Android devices remotely with Prometheus & Grafana. No root required!
 4. Install [Grafana](https://grafana.com/grafana/download)
 
 ### Step 3: Create SSH Tunnel
+**First get your Android IP:**
+1. On Android, after running setup, it shows your IP
+2. Or run in Termux: <pre> `python3 -c "import socket; s=socket.socket(); s.connect(('8.8.8.8',53)); print(s.getsockname()[0]); s.close()"` </pre>
+
 Open Git Bash/PowerShell:
 <pre>
 ssh -N -L 19100:localhost:9100 termux@YOUR_ANDROID_IP -p 8022
@@ -56,16 +60,17 @@ Edit `prometheus.yml` and add:
 
 ## 🛠️ Project Structure
 <pre>
-android-agent/          # Android scripts
-├── android_exporter.py
-└── setup_android.sh
-windows-client/         # Windows scripts
-└── setup_windows.ps1
-examples/              # Config examples
-├── prometheus.yml
-└── grafana-dashboard.json
+free-android-device-monitoring/
+├── README.md
+├── LICENSE
+├── .gitignore
+├── android-agent/
+│   ├── android_exporter.py
+│   └── setup_android.sh
+├── examples/
+│   ├── prometheus.yml
+│   └── grafana-dashboard.json
 </pre>
-
 
 ## 🔧 Troubleshooting
 - **SSH connection refused**: Check Android is on same Wi-Fi
