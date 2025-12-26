@@ -1,0 +1,13 @@
+# Android Device Monitoring
+*.log
+logs/
+exporter.log
+boot.log
+/data/data/com.termux/
+*.exe
+*.msi
+.DS_Store
+.env
+tmp/
+temp/
+*.bak
