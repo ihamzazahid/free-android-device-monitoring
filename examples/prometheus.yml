@@ -1,0 +1,18 @@
+# Example Prometheus config for Android monitoring
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Android device via SSH tunnel
+  - job_name: 'android-devices'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['localhost:19100']
+    labels:
+      device_type: 'android'
+      location: 'remote'
