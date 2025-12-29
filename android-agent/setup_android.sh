@@ -1,56 +1,51 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Android Device Monitoring Setup
+set -e
 
-echo "📱 Android Device Monitoring Setup"
-echo "=================================="
+echo "📱 Android Push Monitoring Setup"
+echo "================================"
 
-# Update and install
+# Update system
 pkg update -y && pkg upgrade -y
-pkg install -y python openssh curl
-pip install prometheus-client --upgrade
+
+# Install dependencies
+pkg install -y python curl git
+
+# Install Prometheus client and psutil
+pip install --upgrade prometheus-client psutil requests
+
+# Install Tailscale
+if ! command -v tailscale &> /dev/null; then
+    echo "⬇️ Installing Tailscale..."
+    curl -fsSL https://tailscale.com/install.sh | sh
+fi
+
+# Start tailscaled
+echo "🚀 Starting Tailscale..."
+tailscaled >/dev/null 2>&1 &
+sleep 2
+tailscale up || true
 
 # Create directories
-mkdir -p ~/.scripts ~/.termux/boot
+mkdir -p ~/.scripts
 cd ~/.scripts
 
-# Download exporter
-curl -sL https://raw.githubusercontent.com/ihamzazahid/free-android-device-monitoring/main/android-agent/android_exporter.py -o android_exporter.py
-chmod +x android_exporter.py
+# Download Python exporter
+echo "⬇️ Downloading Android pusher..."
+curl -sL https://raw.githubusercontent.com/ihamzazahid/free-android-device-monitoring/main/android-agent/android_pusher.py -o android_pusher.py
+chmod +x android_pusher.py
 
-# Setup SSH
-echo "Set SSH password:"
-passwd
-sshd
-
-# Get IP
-DEVICE_IP=$(python3 -c "
-import socket
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.connect(('8.8.8.8', 53))
-print(s.getsockname()[0])
-s.close()
-")
-
-echo "IP_ADDRESS=$DEVICE_IP" > ~/.android_config
-
-# Create info script
-cat > ~/connection_info.sh << EOF
-echo ""
-echo "📱 DEVICE INFO:"
-echo "IP: \$DEVICE_IP"
-echo "SSH Port: 8022"
-echo "Metrics Port: 9100"
-echo ""
-echo "💻 On laptop, run:"
-echo "ssh -N -L 19100:localhost:9100 termux@\$DEVICE_IP -p 8022"
+# Save config
+cat > ~/.android_monitor.conf << EOF
+PUSHGATEWAY=100.97.72.3:9091
+JOB_NAME=android_device
+PUSH_INTERVAL=15
 EOF
 
-chmod +x ~/connection_info.sh
-
 # Start exporter
-cd ~/.scripts
-nohup python android_exporter.py > exporter.log 2>&1 &
+echo "📊 Starting metric pusher..."
+nohup python ~/.scripts/android_pusher.py > ~/.scripts/android_pusher.log 2>&1 &
 
 echo ""
 echo "✅ Setup complete!"
-echo "Run './connection_info.sh' for connection details"
+echo "📡 Metrics are being PUSHED to your Windows laptop via Tailscale"
+echo "📝 Logs: ~/.scripts/android_pusher.log"
