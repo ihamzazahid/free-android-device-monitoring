@@ -47,16 +47,20 @@ TOP_N_PROCESSES = $TOP_N_PROCESSES
 registry = CollectorRegistry()
 
 # ---------------- METRICS ----------------
-def safe_gauge(name, desc, **kwargs):
+def safe_gauge(name, description, labels=None):
     try:
-        return Gauge(name, desc, **kwargs, registry=registry)
+        if labels:
+            return Gauge(name, description, labels, registry=registry)
+        return Gauge(name, description, registry=registry)
     except Exception as e:
         print(f"⚠️ Failed to create gauge {name}: {e}")
         return None
 
-def safe_counter(name, desc, **kwargs):
+def safe_counter(name, description, labels=None):
     try:
-        return Counter(name, desc, **kwargs, registry=registry)
+        if labels:
+            return Counter(name, description, labels, registry=registry)
+        return Counter(name, description, registry=registry)
     except Exception as e:
         print(f"⚠️ Failed to create counter {name}: {e}")
         return None
@@ -113,8 +117,7 @@ def update_cpu():
         if cpu_percent: cpu_percent.set(psutil.cpu_percent(interval=None))
         if cpu_count: cpu_count.set(psutil.cpu_count())
         if cpu_per_core:
-            per_core = psutil.cpu_percent(interval=None, percpu=True)
-            for i, val in enumerate(per_core):
+            for i, val in enumerate(psutil.cpu_percent(interval=None, percpu=True)):
                 cpu_per_core.labels(core=str(i)).set(val)
         if hasattr(os, "getloadavg"):
             la1, la5, la15 = os.getloadavg()
@@ -157,12 +160,11 @@ def update_battery():
                     if battery_percent: battery_percent.set(0)
                     if battery_plugged: battery_plugged.set(0)
             except PermissionError:
-                print("⚠️ Battery metrics not accessible (Permission denied). Using default values.")
+                print("⚠️ Battery metrics not accessible (Permission denied). Using defaults.")
                 if battery_percent: battery_percent.set(0)
                 if battery_plugged: battery_plugged.set(0)
     except Exception as e:
         print(f"⚠️ Unexpected error updating battery metrics: {e}")
-
 
 def update_network():
     global last_sent, last_recv, last_errin, last_errout
@@ -182,8 +184,9 @@ def update_network():
 def update_processes():
     try:
         if total_processes: total_processes.set(len(psutil.pids()))
-        running = sum(1 for p in psutil.process_iter(attrs=['status']) if p.info['status'] == psutil.STATUS_RUNNING)
-        if running_processes: running_processes.set(running)
+        if running_processes:
+            running = sum(1 for p in psutil.process_iter(attrs=['status']) if p.info['status'] == psutil.STATUS_RUNNING)
+            running_processes.set(running)
     except Exception as e:
         print(f"⚠️ Process metrics not accessible: {e}")
 
@@ -238,6 +241,7 @@ EOF
 chmod +x $SCRIPTS_DIR/android_pusher.py
 
 # ---------------- MANAGEMENT SCRIPTS ----------------
+# Start
 cat > $SCRIPTS_DIR/start_monitoring.sh << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 cd $SCRIPTS_DIR
@@ -247,6 +251,7 @@ echo \$PID > android_pusher.pid
 echo "✅ Monitoring started (PID: \$PID)"
 EOF
 
+# Stop
 cat > $SCRIPTS_DIR/stop_monitoring.sh << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 pkill -f android_pusher.py 2>/dev/null
@@ -254,6 +259,7 @@ rm -f $SCRIPTS_DIR/android_pusher.pid 2>/dev/null
 echo "✅ Monitoring stopped"
 EOF
 
+# Status
 cat > $SCRIPTS_DIR/check_status.sh << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 if [ -f $SCRIPTS_DIR/android_pusher.pid ]; then
