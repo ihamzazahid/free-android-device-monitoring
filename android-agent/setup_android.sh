@@ -12,6 +12,28 @@ TUNNEL_URL="dated-finding-troy-diverse.trycloudflare.com"  # <--- Replace with y
 INTERVAL=15
 TOP_N_PROCESSES=5
 
+# ---------------- DEVICE IDENTIFIER ----------------
+if [ -f "$CONFIG_FILE" ]; then
+    DEVICE_NAME=$(cat "$CONFIG_FILE")
+else
+    # Try Android ID first
+    if command -v settings >/dev/null 2>&1; then
+        ANDROID_ID=$(settings get secure android_id 2>/dev/null)
+    fi
+
+    if [ -n "$ANDROID_ID" ]; then
+        DEVICE_NAME="android_$ANDROID_ID"
+    else
+        # Fallback: hostname + random 4-digit suffix
+        RAND_SUFFIX=$((RANDOM%10000))
+        DEVICE_NAME="$(hostname)_$RAND_SUFFIX"
+    fi
+
+    echo "$DEVICE_NAME" > "$CONFIG_FILE"
+fi
+
+echo "📱 Device identifier: $DEVICE_NAME"
+
 # ---------------- UPDATE SYSTEM ----------------
 echo "🔄 Updating Termux packages..."
 pkg update -y && pkg upgrade -y
@@ -27,30 +49,12 @@ pkill -f android_pusher.py 2>/dev/null || true
 rm -rf $SCRIPTS_DIR
 mkdir -p $SCRIPTS_DIR
 
-# ---------------- DEVICE INFO ----------------
-DEVICE_NAME=$(hostname)
-echo "📱 Device name: $DEVICE_NAME"
-
 # ---------------- CREATE PYTHON PUSHER ----------------
 cat > $SCRIPTS_DIR/android_pusher.py << EOF
 #!/usr/bin/env python3
-"""
-Android Prometheus PUSH exporter (CGNAT-safe)
-Collects:
-- CPU: total + per core + load average
-- Memory + swap
-- Storage
-- Battery
-- Network
-- Uptime
-- Processes: total, running
-- Top N processes by CPU & memory
-"""
-
-import time, os, socket, psutil
+import time, os, psutil
 from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
 
-# ---------------- CONFIG ----------------
 TUNNEL_URL = "$TUNNEL_URL"
 DEVICE_NAME = "$DEVICE_NAME"
 INTERVAL = $INTERVAL
@@ -180,7 +184,7 @@ def update_uptime():
     last_uptime = up
 
 # ---------------- MAIN LOOP ----------------
-print(f"📡 Pushing metrics to {TUNNEL_URL} every {INTERVAL}s")
+print(f"📡 Pushing metrics to {TUNNEL_URL} every {INTERVAL}s as {DEVICE_NAME}")
 
 while True:
     update_cpu()
