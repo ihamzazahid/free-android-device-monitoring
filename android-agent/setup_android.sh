@@ -100,16 +100,19 @@ last_errout = 0
 
 # ---------------- UPDATE FUNCTIONS ----------------
 def update_cpu():
-    cpu_percent.set(psutil.cpu_percent(interval=None))
-    cpu_count.set(psutil.cpu_count())
-    per_core = psutil.cpu_percent(interval=None, percpu=True)
-    for i, val in enumerate(per_core):
-        cpu_per_core.labels(core=str(i)).set(val)
-    if hasattr(os, "getloadavg"):
-        la1, la5, la15 = os.getloadavg()
-        load_avg_1.set(la1)
-        load_avg_5.set(la5)
-        load_avg_15.set(la15)
+    try:
+        cpu_percent.set(psutil.cpu_percent(interval=None))
+        cpu_count.set(psutil.cpu_count())
+        per_core = psutil.cpu_percent(interval=None, percpu=True)
+        for i, val in enumerate(per_core):
+            cpu_per_core.labels(core=str(i)).set(val)
+        if hasattr(os, "getloadavg"):
+            la1, la5, la15 = os.getloadavg()
+            load_avg_1.set(la1)
+            load_avg_5.set(la5)
+            load_avg_15.set(la15)
+    except (PermissionError, FileNotFoundError) as e:
+        print(f"⚠️ CPU metrics not accessible: {e}")
 
 def update_memory():
     mem = psutil.virtual_memory()
@@ -154,18 +157,22 @@ def update_processes():
     running_processes.set(running)
 
 def update_top_processes():
-    top_cpu = sorted(psutil.process_iter(attrs=["pid","name","cpu_percent","memory_info"]),
-                     key=lambda p: p.info["cpu_percent"], reverse=True)[:TOP_N_PROCESSES]
-    for proc in top_cpu:
-        try:
-            pid = str(proc.info["pid"])
-            name = proc.info["name"]
-            cpu_val = proc.info["cpu_percent"]
-            mem_val = proc.info["memory_info"].rss/1024/1024
-            process_cpu.labels(pid=pid,name=name).set(cpu_val)
-            process_mem.labels(pid=pid,name=name).set(mem_val)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    try:
+        top_cpu = sorted(psutil.process_iter(attrs=["pid","name","cpu_percent","memory_info"]),
+                         key=lambda p: p.info["cpu_percent"], reverse=True)[:TOP_N_PROCESSES]
+        for proc in top_cpu:
+            try:
+                pid = str(proc.info["pid"])
+                name = proc.info["name"]
+                cpu_val = proc.info["cpu_percent"]
+                mem_val = proc.info["memory_info"].rss/1024/1024
+                process_cpu.labels(pid=pid,name=name).set(cpu_val)
+                process_mem.labels(pid=pid,name=name).set(mem_val)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except (PermissionError, FileNotFoundError) as e:
+        print(f"⚠️ Top process metrics not accessible: {e}")
+
 
 def update_uptime():
     global last_uptime
