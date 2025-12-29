@@ -1,15 +1,20 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -e
 
-echo "📱 Android Push Monitoring Setup (Full Exporter)"
-echo "================================"
+echo "📱 Android Push Monitoring Setup (Direct Push)"
+echo "============================================"
 
 # ---------------- Configuration ----------------
-TS_DIR="$HOME/.tailscale"
 SCRIPTS_DIR="$HOME/.scripts"
 CONFIG_FILE="$HOME/.android_monitor.conf"
 LOG_FILE="$SCRIPTS_DIR/android_pusher.log"
-AUTH_KEY="tskey-auth-kBg5XdeVa221CNTRL-VZmDmYoLpbcsgU6YcRrdbcaNoDT4C6yrH"
+
+# ⚠️ IMPORTANT: Replace with YOUR laptop's Tailscale IP
+# Get this by running 'tailscale ip --4' on your laptop
+LAPTOP_TS_IP="100.97.72.3"  # ⬅️ CHANGE THIS TO YOUR LAPTOP'S TAILSCALE IP
+
+echo "🔧 Will push metrics to laptop at: $LAPTOP_TS_IP:9091"
+echo "   (Make sure Prometheus PushGateway is running there)"
 
 # ---------------- Update system ----------------
 echo "🔄 Updating system packages..."
@@ -17,310 +22,432 @@ pkg update -y && pkg upgrade -y
 
 # ---------------- Install dependencies ----------------
 echo "📦 Installing dependencies..."
-pkg install -y python curl git golang termux-api
+pkg install -y python curl git
 pip install --upgrade prometheus-client psutil requests
 
 # ---------------- Cleanup previous installations ----------------
 echo "🧹 Cleaning up previous installations..."
-pkill -f tailscaled 2>/dev/null || true
 pkill -f android_pusher.py 2>/dev/null || true
-rm -rf $TS_DIR $SCRIPTS_DIR
+rm -rf $SCRIPTS_DIR
+mkdir -p $SCRIPTS_DIR
 
-# ---------------- Install Tailscale for Android ----------------
-echo "⬇️ Installing Tailscale for Android Termux..."
+# ---------------- Get device info ----------------
+DEVICE_NAME=$(hostname)
+echo "📱 Device name: $DEVICE_NAME"
 
-# METHOD 1: Try to use pre-built Android binaries from Tailscale
-echo "Trying Method 1: Downloading Android-specific binaries..."
-mkdir -p $TS_DIR $SCRIPTS_DIR
-cd $TS_DIR
-
-# Try to get the Android APK version and extract binaries
-echo "Downloading Tailscale APK to extract binaries..."
-curl -LO https://pkgs.tailscale.com/unstable/tailscale-android-1.68.1.apk
-
-if [ -f "tailscale-android-1.68.1.apk" ]; then
-    echo "Extracting binaries from APK..."
-    # Extract libtailscale.so from APK (might be in different location)
-    unzip -j tailscale-android-1.68.1.apk "lib/*/libtailscale.so" -d . 2>/dev/null || true
-    
-    if [ -f "libtailscale.so" ]; then
-        echo "Found libtailscale.so, creating wrapper scripts..."
-        # Create wrapper scripts
-        cat > $PREFIX/bin/tailscale << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Tailscale wrapper for Android
-echo "Tailscale command line not fully available on Android"
-echo "Use the Tailscale Android app from Play Store"
-echo "Or use 'termux-tailscale' commands"
-EOF
-        
-        cat > $PREFIX/bin/tailscaled << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Tailscaled wrapper for Android
-echo "tailscaled daemon not available on Android Termux"
-echo "Use the official Tailscale Android app for VPN functionality"
-echo "For CLI access, use Tailscale's userspace networking"
-EOF
-        
-        chmod +x $PREFIX/bin/tailscale $PREFIX/bin/tailscaled
-        echo "✅ Created wrapper scripts for Android"
-    fi
-fi
-
-# METHOD 2: Use userspace networking (no kernel module needed)
-echo ""
-echo "Trying Method 2: Userspace networking approach..."
-echo "This method doesn't require kernel access (no tailscaled)"
-
-# Install tailscale via alternative method
-if ! command -v tailscale >/dev/null 2>&1; then
-    echo "Installing Tailscale CLI via alternative method..."
-    
-    # Create a simple userspace tailscale implementation
-    cat > $TS_DIR/userspace_tailscale.sh << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Userspace Tailscale for Android Termux
-TS_DIR="$HOME/.tailscale"
-TAILSCALE_SOCKET="$TS_DIR/tailscale.sock"
-
-case "$1" in
-    "up")
-        if [ -z "$2" ]; then
-            echo "Usage: tailscale up --auth-key <key>"
-            exit 1
-        fi
-        
-        # Extract auth key
-        AUTH_KEY="$3"
-        if [ "$2" != "--auth-key" ] || [ -z "$AUTH_KEY" ]; then
-            echo "Please provide auth key: tailscale up --auth-key YOUR_KEY"
-            exit 1
-        fi
-        
-        echo "Connecting to Tailscale (userspace mode)..."
-        echo "Auth key: ${AUTH_KEY:0:10}..."
-        
-        # In real implementation, this would use tailscale's userspace connector
-        # For now, we'll simulate and store connection state
-        echo "CONNECTED" > "$TS_DIR/status"
-        echo "$AUTH_KEY" > "$TS_DIR/auth_key"
-        date > "$TS_DIR/connected_at"
-        
-        echo "✅ Connected to Tailscale (userspace mode)"
-        echo "Note: Full VPN requires Tailscale Android app"
-        ;;
-    "status")
-        if [ -f "$TS_DIR/status" ]; then
-            echo "Tailscale: Connected (userspace mode)"
-            echo "Since: $(cat $TS_DIR/connected_at 2>/dev/null)"
-        else
-            echo "Tailscale: Not connected"
-        fi
-        ;;
-    "ip")
-        # Generate a deterministic IP based on hostname
-        HASH=$(echo $(hostname) | md5sum | cut -c1-8)
-        IP_PREFIX="100.118"  # Using Tailscale's 100.x.x.x range
-        IP_THIRD=$(printf "%d" "0x${HASH:0:2}")
-        IP_FOURTH=$(printf "%d" "0x${HASH:2:2}")
-        echo "${IP_PREFIX}.${IP_THIRD}.${IP_FOURTH}"
-        ;;
-    "down")
-        rm -f "$TS_DIR/status" "$TS_DIR/connected_at"
-        echo "Disconnected from Tailscale"
-        ;;
-    "version")
-        echo "Tailscale 1.68.1 (userspace Android termux)"
-        ;;
-    *)
-        echo "Tailscale commands available:"
-        echo "  up --auth-key KEY    Connect to Tailscale"
-        echo "  status               Show connection status"
-        echo "  ip                   Get Tailscale IP"
-        echo "  down                 Disconnect"
-        echo "  version              Show version"
-        ;;
-esac
-EOF
-    
-    chmod +x $TS_DIR/userspace_tailscale.sh
-    ln -sf $TS_DIR/userspace_tailscale.sh $PREFIX/bin/tailscale
-    echo "✅ Installed userspace Tailscale CLI"
-fi
-
-# ---------------- Setup connection ----------------
-echo "🔧 Setting up Tailscale connection..."
-
-# Create connection script
-cat > $SCRIPTS_DIR/setup_tailscale.sh << EOF
-#!/data/data/com.termux/files/usr/bin/bash
-# Setup Tailscale connection for Android
-
-echo "Setting up Tailscale for Android monitoring..."
-
-# Method 1: Check if we can use userspace networking
-echo "Method 1: Using simulated Tailscale for monitoring..."
-
-# Store auth key
-echo "$AUTH_KEY" > $TS_DIR/auth_key
-echo "CONNECTED" > $TS_DIR/status
-echo "\$(date)" > $TS_DIR/connected_at
-
-# Generate a consistent IP for this device
-HOSTNAME="\$(hostname)"
-HASH=\$(echo "\$HOSTNAME" | md5sum | cut -c1-8)
-IP_PREFIX="100.118"
-IP_THIRD=\$(printf "%d" "0x\${HASH:0:2}")
-IP_FOURTH=\$(printf "%d" "0x\${HASH:2:2}")
-DEVICE_IP="\${IP_PREFIX}.\${IP_THIRD}.\${IP_FOURTH}"
-
-echo "\$DEVICE_IP" > $TS_DIR/ip_address
-
-echo "✅ Tailscale configured for monitoring"
-echo "   Device IP: \$DEVICE_IP"
-echo "   This IP will be used for metrics pushing"
-echo ""
-echo "⚠️  Note: For full VPN functionality, install:"
-echo "   - Tailscale Android app from Play Store"
-echo "   - Or use SSH forwarding instead"
-EOF
-
-chmod +x $SCRIPTS_DIR/setup_tailscale.sh
-
-# ---------------- Download Python exporter ----------------
+# ---------------- Download/Update Python exporter ----------------
 cd $SCRIPTS_DIR
 echo "⬇️ Downloading Android Prometheus pusher..."
+
+# Try to download the original script
 if curl -sL https://raw.githubusercontent.com/ihamzazahid/free-android-device-monitoring/main/android-agent/android_pusher.py -o android_pusher.py; then
-    # Modify the pusher to work without real Tailscale
-    sed -i "s/100\.97\.72\.3/100.118.0.1/g" android_pusher.py 2>/dev/null || \
-    echo "PUSHGATEWAY = '100.118.0.1:9091'" > android_pusher.py.modified
-    chmod +x android_pusher.py
-    echo "✅ Exporter downloaded and modified"
-else
-    echo "❌ Failed to download exporter"
-    echo "Creating local exporter instead..."
-    # Create minimal exporter
-    cat > android_pusher.py << 'EOF'
+    echo "✅ Downloaded original pusher script"
+    
+    # Modify it to use laptop's Tailscale IP
+    echo "🔧 Modifying script to push to laptop at $LAPTOP_TS_IP..."
+    
+    # Create a modified version
+    cat > android_pusher_modified.py << EOF
 #!/usr/bin/env python3
-import time
+"""
+Android Prometheus Metrics Pusher
+Modified to push directly to laptop's Tailscale IP
+"""
 import os
+import time
+import socket
 import psutil
+from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
+
+# Configuration - PUSH DIRECTLY TO LAPTOP
+PUSHGATEWAY = "$LAPTOP_TS_IP:9091"  # Your laptop's Tailscale IP
+JOB_NAME = f"android_{socket.gethostname().replace('.', '_')}"
+PUSH_INTERVAL = int(os.getenv('PUSH_INTERVAL', '15'))
+TOP_N_PROCESSES = int(os.getenv('TOP_N_PROCESSES', '5'))
+
+print(f"🚀 Android Metrics Pusher")
+print(f"📡 Target: {PUSHGATEWAY}")
+print(f"📋 Job: {JOB_NAME}")
+print(f"⏱️  Interval: {PUSH_INTERVAL}s")
+
+def get_wifi_info():
+    """Try to get WiFi information (Android-specific)"""
+    try:
+        # Try using termux-api if available
+        import subprocess
+        result = subprocess.run(['termux-wifi-connectioninfo'], 
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            import json
+            wifi_info = json.loads(result.stdout)
+            return {
+                'ssid': wifi_info.get('ssid', 'unknown'),
+                'bssid': wifi_info.get('bssid', 'unknown'),
+                'rssi': wifi_info.get('rssi', 0)
+            }
+    except:
+        pass
+    return {'ssid': 'unknown', 'bssid': 'unknown', 'rssi': 0}
+
+def collect_android_metrics():
+    """Collect Android-specific metrics"""
+    registry = CollectorRegistry()
+    
+    # 1. System metrics
+    cpu_percent = Gauge('android_cpu_percent', 'CPU usage percentage', registry=registry)
+    cpu_percent.set(psutil.cpu_percent(interval=1))
+    
+    # 2. Memory metrics
+    mem = psutil.virtual_memory()
+    mem_percent = Gauge('android_memory_percent', 'Memory usage percentage', registry=registry)
+    mem_used = Gauge('android_memory_used_bytes', 'Used memory in bytes', registry=registry)
+    mem_total = Gauge('android_memory_total_bytes', 'Total memory in bytes', registry=registry)
+    mem_available = Gauge('android_memory_available_bytes', 'Available memory in bytes', registry=registry)
+    
+    mem_percent.set(mem.percent)
+    mem_used.set(mem.used)
+    mem_total.set(mem.total)
+    mem_available.set(mem.available)
+    
+    # 3. Disk metrics
+    try:
+        disk = psutil.disk_usage('/data')
+        disk_percent = Gauge('android_disk_percent', 'Disk usage percentage', registry=registry)
+        disk_used = Gauge('android_disk_used_bytes', 'Used disk space in bytes', registry=registry)
+        disk_total = Gauge('android_disk_total_bytes', 'Total disk space in bytes', registry=registry)
+        disk_free = Gauge('android_disk_free_bytes', 'Free disk space in bytes', registry=registry)
+        
+        disk_percent.set(disk.percent)
+        disk_used.set(disk.used)
+        disk_total.set(disk.total)
+        disk_free.set(disk.free)
+    except:
+        pass
+    
+    # 4. Battery info (if available via termux-api)
+    try:
+        import subprocess
+        result = subprocess.run(['termux-battery-status'], 
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            import json
+            battery = json.loads(result.stdout)
+            battery_percent = Gauge('android_battery_percent', 'Battery percentage', registry=registry)
+            battery_health = Gauge('android_battery_health', 'Battery health (1=good)', registry=registry)
+            battery_plugged = Gauge('android_battery_plugged', 'Charging status (1=plugged)', registry=registry)
+            
+            battery_percent.set(battery.get('percentage', 0))
+            battery_health.set(1 if battery.get('health', '') == 'GOOD' else 0)
+            battery_plugged.set(1 if battery.get('plugged', '') != 'UNPLUGGED' else 0)
+    except:
+        pass
+    
+    # 5. Network info
+    net_counters = psutil.net_io_counters()
+    net_bytes_sent = Counter('android_network_bytes_sent_total', 'Total bytes sent', registry=registry)
+    net_bytes_recv = Counter('android_network_bytes_received_total', 'Total bytes received', registry=registry)
+    
+    net_bytes_sent.inc(net_counters.bytes_sent)
+    net_bytes_recv.inc(net_counters.bytes_recv)
+    
+    # 6. WiFi info (if termux-api is installed)
+    try:
+        wifi_info = get_wifi_info()
+        wifi_rssi = Gauge('android_wifi_rssi', 'WiFi signal strength (RSSI)', registry=registry)
+        wifi_rssi.set(wifi_info['rssi'])
+        
+        wifi_ssid_info = Gauge('android_wifi_ssid_info', 'WiFi SSID info', ['ssid'], registry=registry)
+        wifi_ssid_info.labels(ssid=wifi_info['ssid']).set(1)
+    except:
+        pass
+    
+    # 7. Top processes by CPU
+    try:
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+            try:
+                processes.append(proc.info)
+            except:
+                continue
+        
+        # Sort by CPU usage
+        processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
+        
+        for i, proc in enumerate(processes[:TOP_N_PROCESSES]):
+            pid = proc['pid']
+            name = proc['name'] or f'pid_{pid}'
+            proc_cpu = Gauge(f'android_process_cpu', 'Process CPU usage', 
+                           ['pid', 'name', 'rank'], registry=registry)
+            proc_mem = Gauge(f'android_process_memory', 'Process memory usage', 
+                           ['pid', 'name', 'rank'], registry=registry)
+            
+            proc_cpu.labels(pid=str(pid), name=name, rank=str(i+1)).set(proc['cpu_percent'])
+            proc_mem.labels(pid=str(pid), name=name, rank=str(i+1)).set(proc['memory_percent'])
+    except:
+        pass
+    
+    # 8. Uptime
+    uptime = Gauge('android_uptime_seconds', 'System uptime in seconds', registry=registry)
+    uptime.set(time.time() - psutil.boot_time())
+    
+    # 9. Push counter
+    push_counter = Counter('android_metrics_pushes_total', 'Total number of metric pushes', registry=registry)
+    push_counter.inc()
+    
+    return registry
+
+def test_connection():
+    """Test if we can reach the laptop"""
+    try:
+        import socket
+        sock = socket.create_connection(("$LAPTOP_TS_IP", 9091), timeout=5)
+        sock.close()
+        return True
+    except:
+        return False
+
+def main():
+    print("🧪 Testing connection to laptop...")
+    if not test_connection():
+        print(f"❌ Cannot connect to {LAPTOP_TS_IP}:9091")
+        print("   Make sure:")
+        print(f"   1. Laptop Tailscale IP is correct (currently: {LAPTOP_TS_IP})")
+        print("   2. Prometheus PushGateway is running on laptop")
+        print("   3. Both devices are on same Tailscale network")
+        print("   4. Firewall allows port 9091 on laptop")
+        return
+    
+    print("✅ Connection test passed!")
+    print("🚀 Starting metric pushes...")
+    
+    while True:
+        try:
+            registry = collect_android_metrics()
+            push_to_gateway(PUSHGATEWAY, job=JOB_NAME, registry=registry)
+            print(f"✅ [{time.strftime('%H:%M:%S')}] Metrics pushed successfully")
+        except Exception as e:
+            print(f"❌ [{time.strftime('%H:%M:%S')}] Push failed: {str(e)[:50]}...")
+        
+        time.sleep(PUSH_INTERVAL)
+
+if __name__ == '__main__':
+    main()
+EOF
+    
+    chmod +x android_pusher_modified.py
+    echo "✅ Created modified pusher for direct laptop connection"
+    
+    # Use the modified version
+    mv android_pusher_modified.py android_pusher.py
+    
+else
+    echo "⚠️  Could not download, creating local version..."
+    # Create local version (simplified)
+    cat > android_pusher.py << EOF
+#!/usr/bin/env python3
+import time, psutil, socket
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
-# Use the simulated Tailscale IP
-PUSHGATEWAY = '100.118.0.1:9091'
-JOB_NAME = f"android_{os.uname().nodename}"
-PUSH_INTERVAL = 15
+LAPTOP_IP = "$LAPTOP_TS_IP"
+PUSHGATEWAY = f"{LAPTOP_IP}:9091"
+JOB_NAME = f"android_{socket.gethostname()}"
 
-print(f"Android Metrics Pusher")
-print(f"Target: {PUSHGATEWAY}")
-print(f"Job: {JOB_NAME}")
+print(f"Pushing to: {PUSHGATEWAY}")
 
 while True:
     try:
         registry = CollectorRegistry()
+        Gauge('cpu', 'CPU %', registry=registry).set(psutil.cpu_percent())
+        Gauge('mem', 'Memory %', registry=registry).set(psutil.virtual_memory().percent)
+        Gauge('disk', 'Disk %', registry=registry).set(psutil.disk_usage('/data').percent)
         
-        # System metrics
-        cpu = Gauge('android_cpu_percent', 'CPU usage', registry=registry)
-        cpu.set(psutil.cpu_percent())
-        
-        mem = psutil.virtual_memory()
-        mem_used = Gauge('android_memory_bytes', 'Memory used', registry=registry)
-        mem_used.set(mem.used)
-        
-        # Push metrics
         push_to_gateway(PUSHGATEWAY, job=JOB_NAME, registry=registry)
-        print(f"[{time.ctime()}] Metrics pushed")
-        
+        print(f"✓ Pushed at {time.ctime()}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"✗ Failed: {e}")
     
-    time.sleep(PUSH_INTERVAL)
+    time.sleep(15)
 EOF
     chmod +x android_pusher.py
 fi
 
-# ---------------- Setup monitoring ----------------
-echo "🔧 Setting up monitoring system..."
-
-# Create config
+# ---------------- Create config file ----------------
 cat > $CONFIG_FILE << EOF
 # Android Monitor Configuration
-PUSHGATEWAY=100.118.0.1:9091
-JOB_NAME=android_$(hostname)_termux
+PUSHGATEWAY=$LAPTOP_TS_IP:9091
+JOB_NAME=android_${DEVICE_NAME}
 PUSH_INTERVAL=15
-DEVICE_IP=$(cat $TS_DIR/ip_address 2>/dev/null || echo "100.118.128.1")
-AUTH_KEY_USED=${AUTH_KEY:0:15}...
+DEVICE_NAME=$DEVICE_NAME
+SETUP_DATE=$(date)
+LAPTOP_TS_IP=$LAPTOP_TS_IP
+
+# Instructions:
+# 1. On laptop, run: tailscale ip --4  (to get IP)
+# 2. Update LAPTOP_TS_IP above if needed
+# 3. Make sure PushGateway runs on laptop:9091
 EOF
+
+# ---------------- Create management scripts ----------------
 
 # Start script
 cat > $SCRIPTS_DIR/start_monitoring.sh << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 echo "\$(date) - Starting Android Monitoring"
 
-# Setup Tailscale simulation
-bash $SCRIPTS_DIR/setup_tailscale.sh
+# Load configuration
+source $CONFIG_FILE 2>/dev/null || true
 
-# Get device IP
-DEVICE_IP=\$(cat $TS_DIR/ip_address 2>/dev/null || echo "100.118.128.1")
-echo "Device IP: \$DEVICE_IP"
+echo "📱 Device: \$(hostname)"
+echo "🎯 Target: \$PUSHGATEWAY"
+echo "📋 Job: \$JOB_NAME"
 
-# Start metrics pusher
+# Check if Python script exists
+if [ ! -f $SCRIPTS_DIR/android_pusher.py ]; then
+    echo "❌ Pusher script not found!"
+    exit 1
+fi
+
+# Kill existing process
+pkill -f "python.*android_pusher" 2>/dev/null && echo "Stopped previous instance"
+
+# Start new process
 cd $SCRIPTS_DIR
 nohup python android_pusher.py >> android_pusher.log 2>&1 &
-echo \$! > android_pusher.pid
+PID=\$!
+echo \$PID > android_pusher.pid
 
-echo "✅ Monitoring started"
-echo "Log: $SCRIPTS_DIR/android_pusher.log"
+echo "✅ Monitoring started (PID: \$PID)"
+echo "📄 Logs: tail -f $SCRIPTS_DIR/android_pusher.log"
 echo ""
-echo "📊 To access metrics from your laptop:"
-echo "1. Make sure laptop is in same Tailscale network"
-echo "2. Use the simulated IP range: 100.118.0.0/16"
-echo "3. Or use real Tailscale IP if Android app is installed"
+echo "🔍 Quick check:"
+echo "   ps aux | grep android_pusher | grep -v grep"
+echo "   tail -5 $SCRIPTS_DIR/android_pusher.log"
 EOF
 
-chmod +x $SCRIPTS_DIR/start_monitoring.sh
+# Stop script
+cat > $SCRIPTS_DIR/stop_monitoring.sh << EOF
+#!/data/data/com.termux/files/usr/bin/bash
+echo "Stopping Android Monitoring..."
+pkill -f "python.*android_pusher" 2>/dev/null
+rm -f $SCRIPTS_DIR/android_pusher.pid 2>/dev/null
+echo "✅ Monitoring stopped"
+EOF
+
+# Status script
+cat > $SCRIPTS_DIR/check_status.sh << EOF
+#!/data/data/com.termux/files/usr/bin/bash
+echo "=== Android Monitoring Status ==="
+echo ""
+
+# Check if running
+if [ -f $SCRIPTS_DIR/android_pusher.pid ]; then
+    PID=\$(cat $SCRIPTS_DIR/android_pusher.pid)
+    if ps -p \$PID >/dev/null 2>&1; then
+        echo "✅ Pusher: Running (PID: \$PID)"
+        echo "   Uptime: \$(ps -o etime= -p \$PID | tr -d ' ')"
+    else
+        echo "❌ Pusher: Not running (stale PID)"
+    fi
+else
+    echo "❌ Pusher: Not running"
+fi
+
+# Show config
+echo ""
+echo "📋 Configuration:"
+echo "   Laptop IP: $LAPTOP_TS_IP"
+echo "   Push URL: $LAPTOP_TS_IP:9091"
+echo "   Device: \$(hostname)"
+
+# Show last log entries
+echo ""
+echo "📄 Recent logs:"
+tail -5 $SCRIPTS_DIR/android_pusher.log 2>/dev/null || echo "   No log file yet"
+EOF
+
+# Update config script (in case laptop IP changes)
+cat > $SCRIPTS_DIR/update_laptop_ip.sh << EOF
+#!/data/data/com.termux/files/usr/bin/bash
+echo "Update Laptop Tailscale IP"
+echo "=========================="
+echo "Current IP: $LAPTOP_TS_IP"
+echo ""
+echo "To get your laptop's Tailscale IP:"
+echo "1. On laptop, run: tailscale ip --4"
+echo "2. Copy the IP (starts with 100.)"
+echo ""
+echo "Enter new laptop IP:"
+read NEW_IP
+
+if [[ \$NEW_IP =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+\$ ]]; then
+    # Update config file
+    sed -i "s/LAPTOP_TS_IP=.*/LAPTOP_TS_IP=\$NEW_IP/" $CONFIG_FILE
+    sed -i "s/PUSHGATEWAY=.*/PUSHGATEWAY=\$NEW_IP:9091/" $CONFIG_FILE
+    
+    # Update python script
+    sed -i "s/LAPTOP_IP = \\".*\\"/LAPTOP_IP = \\"\$NEW_IP\\"/" $SCRIPTS_DIR/android_pusher.py 2>/dev/null
+    sed -i "s/PUSHGATEWAY = \\".*:9091\\"/PUSHGATEWAY = \\"\$NEW_IP:9091\\"/" $SCRIPTS_DIR/android_pusher.py 2>/dev/null
+    
+    echo "✅ Updated laptop IP to: \$NEW_IP"
+    echo ""
+    echo "Restart monitoring:"
+    echo "  $SCRIPTS_DIR/stop_monitoring.sh"
+    echo "  $SCRIPTS_DIR/start_monitoring.sh"
+else
+    echo "❌ Invalid IP. Must be Tailscale IP (starts with 100.)"
+fi
+EOF
+
+chmod +x $SCRIPTS_DIR/*.sh
+
+# ---------------- Test connection first ----------------
+echo ""
+echo "🧪 Testing connection to laptop..."
+python -c "
+import socket
+try:
+    sock = socket.create_connection(('$LAPTOP_TS_IP', 9091), timeout=5)
+    sock.close()
+    print('✅ SUCCESS: Can connect to laptop at $LAPTOP_TS_IP:9091')
+except Exception as e:
+    print('❌ FAILED: Cannot connect to $LAPTOP_TS_IP:9091')
+    print('   Error:', str(e))
+    print('')
+    print('⚠️  Please check:')
+    print('   1. Run on laptop: tailscale ip --4')
+    print('   2. Update LAPTOP_TS_IP in this script')
+    print('   3. Ensure PushGateway runs on laptop port 9091')
+"
 
 # ---------------- Start monitoring ----------------
+echo ""
 echo "🚀 Starting monitoring..."
 $SCRIPTS_DIR/start_monitoring.sh
 
 # ---------------- Final instructions ----------------
 echo ""
-echo "✅ ANDROID MONITORING SETUP COMPLETE!"
-echo "========================================"
+echo "✅ SETUP COMPLETE!"
+echo "=================="
 echo ""
-echo "📱 IMPORTANT: Android Limitations"
-echo "--------------------------------"
-echo "Termux cannot run real tailscaled due to Android security restrictions."
+echo "📱 Android Device: $DEVICE_NAME"
+echo "💻 Laptop Target: $LAPTOP_TS_IP:9091"
 echo ""
-echo "🎯 WORKAROUNDS AVAILABLE:"
+echo "⚡ Management Commands:"
+echo "   Start:  $SCRIPTS_DIR/start_monitoring.sh"
+echo "   Stop:   $SCRIPTS_DIR/stop_monitoring.sh"
+echo "   Status: $SCRIPTS_DIR/check_status.sh"
+echo "   Update IP: $SCRIPTS_DIR/update_laptop_ip.sh"
 echo ""
-echo "OPTION 1: Use Tailscale Android App (Recommended)"
-echo "  1. Install 'Tailscale' from Play Store"
-echo "  2. Log in with your account"
-echo "  3. Enable VPN in the app"
-echo "  4. Your device will get a real Tailscale IP"
+echo "📊 On Your Laptop:"
+echo "   1. Ensure Tailscale is running: tailscale status"
+echo "   2. Run Prometheus PushGateway:"
+echo "      docker run -d -p 9091:9091 prom/pushgateway"
+echo "   3. Check received metrics:"
+echo "      curl http://localhost:9091/metrics | grep android"
 echo ""
-echo "OPTION 2: SSH Tunneling (Alternative)"
-echo "  1. Install Termux:API from F-Droid"
-echo "  2. Set up SSH server in Termux:"
-echo "     pkg install openssh"
-echo "     sshd"
-echo "  3. Create tunnel from laptop:"
-echo "     ssh -R 9091:localhost:9091 termux-device"
+echo "🔧 If connection fails:"
+echo "   1. Get laptop IP: tailscale ip --4 (on laptop)"
+echo "   2. Update: $SCRIPTS_DIR/update_laptop_ip.sh"
+echo "   3. Restart: $SCRIPTS_DIR/stop_monitoring.sh && $SCRIPTS_DIR/start_monitoring.sh"
 echo ""
-echo "OPTION 3: Use Simulated Network (Current Setup)"
-echo "  • Using IP range: 100.118.x.x"
-echo "  • Metrics pushed to: 100.118.0.1:9091"
-echo "  • You'll need to forward ports on your laptop"
-echo ""
-echo "🔧 Current Status:"
-echo "  Monitoring: Running"
-echo "  Simulated IP: $(cat $TS_DIR/ip_address 2>/dev/null || echo '100.118.128.1')"
-echo "  Auth Key: ${AUTH_KEY:0:15}..."
-echo ""
-echo "⚡ Commands:"
-echo "  Start:  ~/.scripts/start_monitoring.sh"
-echo "  Stop:   pkill -f android_pusher.py"
-echo "  Logs:   tail -f ~/.scripts/android_pusher.log"
+echo "📝 Logs: tail -f $SCRIPTS_DIR/android_pusher.log"
