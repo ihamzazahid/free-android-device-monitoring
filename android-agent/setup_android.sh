@@ -13,24 +13,14 @@ INTERVAL=15
 TOP_N_PROCESSES=5
 
 # ---------------- DEVICE IDENTIFIER ----------------
-if [ -f "$CONFIG_FILE" ]; then
-    DEVICE_NAME=$(cat "$CONFIG_FILE")
-else
-    # Try Android ID first
-    if command -v settings >/dev/null 2>&1; then
-        ANDROID_ID=$(settings get secure android_id 2>/dev/null)
-    fi
 
-    if [ -n "$ANDROID_ID" ]; then
-        DEVICE_NAME="android_$ANDROID_ID"
-    else
-        # Fallback: hostname + random 4-digit suffix
-        RAND_SUFFIX=$((RANDOM%10000))
-        DEVICE_NAME="$(hostname)_$RAND_SUFFIX"
-    fi
+# Fallback: hostname + random 4-digit suffix
+RAND_SUFFIX=$((RANDOM%10000))
+DEVICE_NAME="$(hostname)_$RAND_SUFFIX"
+    
 
-    echo "$DEVICE_NAME" > "$CONFIG_FILE"
-fi
+echo "$DEVICE_NAME" > "$CONFIG_FILE"
+
 
 echo "📱 Device identifier: $DEVICE_NAME"
 
