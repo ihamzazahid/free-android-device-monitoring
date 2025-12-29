@@ -148,15 +148,21 @@ def update_storage():
 def update_battery():
     try:
         if hasattr(psutil, "sensors_battery"):
-            bat = psutil.sensors_battery()
-            if bat:
-                if battery_percent: battery_percent.set(bat.percent)
-                if battery_plugged: battery_plugged.set(1 if bat.power_plugged else 0)
-            else:
+            try:
+                bat = psutil.sensors_battery()
+                if bat:
+                    if battery_percent: battery_percent.set(bat.percent)
+                    if battery_plugged: battery_plugged.set(1 if bat.power_plugged else 0)
+                else:
+                    if battery_percent: battery_percent.set(0)
+                    if battery_plugged: battery_plugged.set(0)
+            except PermissionError:
+                print("⚠️ Battery metrics not accessible (Permission denied). Using default values.")
                 if battery_percent: battery_percent.set(0)
                 if battery_plugged: battery_plugged.set(0)
     except Exception as e:
-        print(f"⚠️ Battery metrics not accessible: {e}")
+        print(f"⚠️ Unexpected error updating battery metrics: {e}")
+
 
 def update_network():
     global last_sent, last_recv, last_errin, last_errout
