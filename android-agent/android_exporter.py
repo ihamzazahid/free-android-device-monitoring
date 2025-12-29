@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import json
 import os
-import subprocess
 import time
+import json
+import subprocess
 import hashlib
 import psutil
 from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
@@ -13,6 +13,7 @@ INTERVAL = int(os.environ.get("INTERVAL", "15"))
 
 # ---------------- HELPERS ----------------
 def run_termux(cmd):
+    """Safely run termux-api commands and return parsed JSON"""
     try:
         out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
         return json.loads(out.decode())
@@ -28,10 +29,12 @@ DEVICE_ID = stable_device_id()
 # ---------------- PROMETHEUS ----------------
 registry = CollectorRegistry()
 
-# Device
-device_info = Gauge("android_device_info", "Device info",
-                    ["device_id", "brand", "model", "android_version"],
-                    registry=registry)
+# Device info
+device_info = Gauge(
+    "android_device_info", "Device info",
+    ["device_id", "brand", "model", "android_version"],
+    registry=registry
+)
 
 # CPU / Memory
 cpu_percent = Gauge("android_cpu_percent", "CPU usage percent", registry=registry)
@@ -49,8 +52,7 @@ battery_charging = Gauge("android_battery_charging", "Battery charging (1=yes)",
 battery_temp = Gauge("android_battery_temperature_c", "Battery temperature C", registry=registry)
 
 # Network
-network_type = Gauge("android_network_type", "Network type",
-                     ["type"], registry=registry)
+network_type = Gauge("android_network_type", "Network type", ["type"], registry=registry)
 cell_signal = Gauge("android_cell_signal_dbm", "Cell signal dBm", registry=registry)
 net_sent = Counter("android_network_bytes_sent_total", "Bytes sent", registry=registry)
 net_recv = Counter("android_network_bytes_recv_total", "Bytes recv", registry=registry)
@@ -62,14 +64,13 @@ process_count = Gauge("android_process_count", "Process count", registry=registr
 # ---------------- COLLECTORS ----------------
 def collect_device():
     info = run_termux(["termux-telephony-deviceinfo"])
-    if not info:
-        return
-    device_info.labels(
-        device_id=DEVICE_ID,
-        brand=info.get("manufacturer", "unknown"),
-        model=info.get("model", "unknown"),
-        android_version=info.get("device_version", "unknown")
-    ).set(1)
+    if info:
+        device_info.labels(
+            device_id=DEVICE_ID,
+            brand=info.get("manufacturer", "unknown"),
+            model=info.get("model", "unknown"),
+            android_version=info.get("device_version", "unknown")
+        ).set(1)
 
 def collect_cpu_mem():
     try:
@@ -91,27 +92,23 @@ def collect_storage():
 
 def collect_battery():
     b = run_termux(["termux-battery-status"])
-    if not b:
-        return
-    battery_percent.set(b.get("percentage", 0))
-    battery_charging.set(1 if b.get("status") == "CHARGING" else 0)
-    battery_temp.set(b.get("temperature", 0))
+    if b:
+        battery_percent.set(b.get("percentage", 0))
+        battery_charging.set(1 if b.get("status") == "CHARGING" else 0)
+        battery_temp.set(b.get("temperature", 0))
 
 def collect_network():
     wifi = run_termux(["termux-wifi-connectioninfo"])
     tele = run_termux(["termux-telephony-signalinfo"])
-
     network_type.clear()
-
     if wifi and wifi.get("supplicant_state") == "COMPLETED":
         network_type.labels(type="wifi").set(1)
     elif tele:
         network_type.labels(type="mobile").set(1)
         try:
-            cell_signal.set(tele[0]["signalStrength"])
+            cell_signal.set(tele[0].get("signalStrength", 0))
         except Exception:
             pass
-
     try:
         net = psutil.net_io_counters()
         net_sent.inc(net.bytes_sent)
